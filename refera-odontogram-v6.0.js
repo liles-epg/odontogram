@@ -14,7 +14,7 @@
 
   const NS = "http://www.w3.org/2000/svg";
   const STYLE_ID = "refera-odontogram-v60-styles";
-  const BUILD = "6.0.3";
+  const BUILD = "6.0.5";
   const DEBUG = true;
   const FIELD_RETRY_MS = 250;
   const FIELD_RETRY_LIMIT = 80;
@@ -22,11 +22,11 @@
   const MOUNT_RETRY_LIMIT = 400;
 
   function log(...args) {
-    if (DEBUG && window.console) console.log("[Odontogram V6.0 Artwork Polish]", ...args);
+    if (DEBUG && window.console) console.log("[Odontogram V6.0 Quadrant Selection Fixed]", ...args);
   }
 
   function warn(...args) {
-    if (window.console) console.warn("[Odontogram V6.0 Artwork Polish]", ...args);
+    if (window.console) console.warn("[Odontogram V6.0 Quadrant Selection Fixed]", ...args);
   }
 
   const TEETH = [
@@ -66,6 +66,14 @@
     { id:"LL7", universal:"18", fdi:"37", quadrant:"Lower Left", family:"molar",    side:"left" },
     { id:"LL8", universal:"17", fdi:"38", quadrant:"Lower Left", family:"molar",    side:"left" }
   ];
+
+  const QUADRANT_TEETH = Object.freeze({
+    upperRight: Object.freeze(["UR8","UR7","UR6","UR5","UR4","UR3","UR2","UR1"]),
+    upperLeft:  Object.freeze(["UL1","UL2","UL3","UL4","UL5","UL6","UL7","UL8"]),
+    lowerRight: Object.freeze(["LR8","LR7","LR6","LR5","LR4","LR3","LR2","LR1"]),
+    lowerLeft:  Object.freeze(["LL1","LL2","LL3","LL4","LL5","LL6","LL7","LL8"])
+  });
+
 
   const TOOTH_ARTWORK = Object.freeze({
     UR8: Object.freeze({
@@ -340,6 +348,26 @@
   font-size: 13px;
   font-weight: 500;
   letter-spacing: .005em;
+  cursor: pointer;
+  user-select: none;
+  transition: fill .15s ease, opacity .15s ease;
+}
+.odv2-quadrant-control {
+  cursor: pointer;
+  outline: none;
+}
+.odv2-quadrant-control:hover .odv2-quadrant,
+.odv2-quadrant-control:focus .odv2-quadrant {
+  fill: var(--odv2-green);
+}
+.odv2-quadrant-control.is-selected .odv2-quadrant {
+  fill: var(--odv2-green);
+  font-weight: 650;
+}
+.odv2-quadrant-hit {
+  fill: rgba(255,255,255,.001);
+  stroke: none;
+  pointer-events: all;
 }
 .odv2-tooth { cursor: pointer; outline: none; }
 .odv2-hit { fill: rgba(255,255,255,.001); stroke: none; pointer-events: all; }
@@ -573,16 +601,60 @@
     svg.append(guides);
 
     const labels = [
-      ["Upper Right", 28, 222, "start"],
-      ["Upper Left", 732, 222, "end"],
-      ["Lower Right", 28, 610, "start"],
-      ["Lower Left", 732, 610, "end"]
+      { key:"upperRight", text:"Upper Right", x:28,  y:222, anchor:"start", width:96 },
+      { key:"upperLeft",  text:"Upper Left",  x:732, y:222, anchor:"end",   width:88 },
+      { key:"lowerRight", text:"Lower Right", x:28,  y:610, anchor:"start", width:96 },
+      { key:"lowerLeft",  text:"Lower Left",  x:732, y:610, anchor:"end",   width:88 }
     ];
 
-    labels.forEach(([text,x,y,anchor]) => {
-      const t = svgEl("text", { class:"odv2-quadrant", x, y, "text-anchor":anchor });
-      t.textContent = text;
-      svg.append(t);
+    labels.forEach(item => {
+      const group = svgEl("g", {
+        class:"odv2-quadrant-control",
+        "data-quadrant":item.key,
+        role:"button",
+        tabindex:"0",
+        "aria-pressed":"false",
+        "aria-label":`Select ${item.text} quadrant`
+      });
+
+      const hitX = item.anchor === "end"
+        ? item.x - item.width - 6
+        : item.x - 6;
+
+      const hit = svgEl("rect", {
+        class:"odv2-quadrant-hit",
+        x:hitX,
+        y:item.y - 20,
+        width:item.width + 12,
+        height:28,
+        rx:5
+      });
+
+      const textNode = svgEl("text", {
+        class:"odv2-quadrant",
+        x:item.x,
+        y:item.y,
+        "text-anchor":item.anchor
+      });
+      textNode.textContent = item.text;
+
+      group.append(hit, textNode);
+
+      group.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleQuadrant(item.key);
+      });
+
+      group.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleQuadrant(item.key);
+        }
+      });
+
+      svg.append(group);
     });
   }
 
@@ -1041,6 +1113,13 @@
       }
     });
 
+    svg.querySelectorAll(".odv2-quadrant-control").forEach(control => {
+      const ids = QUADRANT_TEETH[control.dataset.quadrant] || [];
+      const allSelected = ids.length === 8 && ids.every(id => state.selected.has(id));
+      control.classList.toggle("is-selected", allSelected);
+      control.setAttribute("aria-pressed", String(allSelected));
+    });
+
     mount.querySelectorAll("[data-system]").forEach(btn => {
       const active = btn.dataset.system === state.system;
       btn.classList.toggle("is-active", active);
@@ -1059,6 +1138,28 @@
     else state.selected.add(id);
 
     liveRegion.textContent = `Tooth ${tooth[state.system]} ${state.selected.has(id) ? "selected" : "removed"}.`;
+    render();
+  }
+
+  function toggleQuadrant(key) {
+    const ids = QUADRANT_TEETH[key];
+    if (!ids) return;
+
+    const allSelected = ids.every(id => state.selected.has(id));
+
+    ids.forEach(id => {
+      if (allSelected) state.selected.delete(id);
+      else state.selected.add(id);
+    });
+
+    const readable = key
+      .replace(/([A-Z])/g, " $1")
+      .replace(/^./, char => char.toUpperCase());
+
+    liveRegion.textContent = allSelected
+      ? `${readable} quadrant cleared.`
+      : `${readable} quadrant selected.`;
+
     render();
   }
 
@@ -1210,6 +1311,18 @@
     resync() {
       log("Manual resync requested.");
       return syncFields();
+    },
+    selectQuadrant(key) {
+      const ids = QUADRANT_TEETH[key];
+      if (!ids) return false;
+      ids.forEach(id => state.selected.add(id));
+      render();
+      return true;
+    },
+    toggleQuadrant(key) {
+      if (!QUADRANT_TEETH[key]) return false;
+      toggleQuadrant(key);
+      return true;
     }
   });
 
